@@ -2,7 +2,7 @@
 import Image from 'next/image';
 import dottedface from '@/media/dottedface.gif';
 
-export default function DottedFace(props: React.PropsWithChildren<{}>) {
+export default function DottedFace(props: React.PropsWithChildren<{className?: string}>) {
     return (
     
         <div className="flex justify-center items-center">
