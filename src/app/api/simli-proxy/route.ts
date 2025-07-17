@@ -35,9 +35,12 @@ export async function POST(req: NextRequest) {
       });
 
       if (!simliResponse.ok) {
-        const errorData = await simliResponse.json();
+        const errorData: unknown = await simliResponse.json();
         console.error("Simli /auto/token API error (raw):", simliResponse.status, errorData);
-        throw new Error(`Simli Auto Token API error: ${simliResponse.status} - ${errorData.message || JSON.stringify(errorData)}`);
+        const errorMessage = typeof errorData === 'object' && errorData !== null && 'message' in errorData
+          ? (errorData as { message: string }).message
+          : JSON.stringify(errorData);
+          throw new Error(`Simli Auto Token API error: ${simliResponse.status} - ${errorMessage}`);
       }
 
       const data = await simliResponse.json();
@@ -55,9 +58,13 @@ export async function POST(req: NextRequest) {
       });
 
       if (!iceResponse.ok) {
-        const errorData = await iceResponse.json();
+        const errorData: unknown = await iceResponse.json();
         console.error("Simli /getIceServers API error (raw):", iceResponse.status, errorData);
-        throw new Error(`Simli ICE server API error: ${iceResponse.status} - ${errorData.message || JSON.stringify(errorData)}`);
+        const errorMessage = 
+          typeof errorData === 'object' && errorData !== null && 'message' in errorData
+            ? (errorData as { message: string }).message
+            : JSON.stringify(errorData);
+        throw new Error(`Simli ICE server API error: ${iceResponse.status} - ${errorMessage}`);
       }
 
       const data = await iceResponse.json();
@@ -68,10 +75,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid request type provided.' }, { status: 400 });
     }
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Simli proxy error:', error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
     return NextResponse.json(
-      { error: error.message || 'An unexpected error occurred on the proxy server.' },
+      { error: errorMessage || 'An unexpected error occurred on the proxy server.' },
       { status: 500 }
     );
   }
