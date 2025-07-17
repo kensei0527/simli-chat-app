@@ -107,7 +107,7 @@ const SimliAvatar: React.FC<SimliAvatarProps> = ({ faceId }) => {
       let config: SimliClientConfig = {
         faceID: faceId,
         session_token: tokenData.session_token, 
-        SimliURL: 'api.simli.ai/startWebRTCSession', 
+        SimliURL: tokenData.ws_url,
         apiKey: '', 
         maxRetryAttempts: 3, 
         retryDelay_ms: 1000,
