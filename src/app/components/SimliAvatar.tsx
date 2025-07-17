@@ -18,27 +18,63 @@ const SimliAvatar: React.FC<SimliAvatarProps> = ({ faceId }) => {
 
   const mediaStreamRef = useRef<MediaStream | null>(null);
 
+  // マイクからの音声入力ストリームを停止する関数
+  const stopMicrophone = useCallback(() => {
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach(track => track.stop());
+      mediaStreamRef.current = null;
+    }
+    setIsListening(false);
+    console.log('Microphone stopped.');
+  }, []); // 依存関係がないため空のまま
+
+  // マイクからの音声入力ストリームを開始し、Simliに送信する関数
+  const startMicrophoneAndStreamToSimli = useCallback(async (client: SimliClient) => {
+    if (isListening) return;
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaStreamRef.current = stream;
+      setIsListening(true);
+      console.log('Microphone access granted. Streaming to Simli...');
+
+      const audioTrack = stream.getAudioTracks()[0];
+      if (audioTrack) {
+        client.listenToMediastreamTrack(audioTrack);
+      } else {
+        console.error('No audio track found in microphone stream.');
+        stopMicrophone(); // 依存関係に追加
+      }
+
+    } catch (err: unknown) { // 'any' から 'unknown' に修正
+      console.error('Error accessing microphone:', err);
+      alert(`Microphone access denied or error: ${err instanceof Error ? err.message : String(err)}`);
+      setIsListening(false);
+    }
+  }, [isListening, stopMicrophone]); // stopMicrophone を依存配列に追加
+
   useEffect(() => {
     const client = new SimliClient();
     simliClientRef.current = client;
 
+    // Simliイベントリスナーの設定
     client.on('connected', () => {
       console.log('Simli connected!');
       setIsSimliConnected(true);
-      startMicrophoneAndStreamToSimli(client);
+      startMicrophoneAndStreamToSimli(client); // 依存関係に追加
     });
 
     client.on('disconnected', () => {
       console.log('Simli disconnected!');
       setIsSimliConnected(false);
-      stopMicrophone();
+      stopMicrophone(); // 依存関係に追加
     });
 
-    client.on('failed', (error: any) => {
+    client.on('failed', (error: unknown) => { // 'any' から 'unknown' に修正
       console.error('Simli connection failed:', error);
       alert(`Simli connection failed: ${error instanceof Error ? error.message : String(error)}`);
       setIsSimliConnected(false);
-      stopMicrophone();
+      stopMicrophone(); // 依存関係に追加
     });
 
     client.on('speaking', () => {
@@ -55,9 +91,9 @@ const SimliAvatar: React.FC<SimliAvatarProps> = ({ faceId }) => {
       if (simliClientRef.current && typeof simliClientRef.current.close === 'function') {
         simliClientRef.current.close();
       }
-      stopMicrophone();
+      stopMicrophone(); // 依存関係に追加
     };
-  }, []);
+  }, [startMicrophoneAndStreamToSimli, stopMicrophone]); // コールバック関数を依存配列に追加
 
   const initializeAndStartSimli = useCallback(async () => {
     const client = simliClientRef.current;
@@ -67,12 +103,11 @@ const SimliAvatar: React.FC<SimliAvatarProps> = ({ faceId }) => {
       const backendProxyUrl = '/api/simli-proxy'; 
 
       // 1. Simli Autoのセッショントークンをプロキシ経由で取得
-      // POST /auto/token
       const tokenResponse = await fetch(backendProxyUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          type: 'createAutoToken', // プロキシにトークン生成リクエストを伝える
+          type: 'createAutoToken', 
         }),
       });
       const tokenData = await tokenResponse.json();
@@ -84,26 +119,23 @@ const SimliAvatar: React.FC<SimliAvatarProps> = ({ faceId }) => {
       }
 
       // 2. ICEサーバー情報をプロキシ経由で取得
-      // POST /getIceServers
       const iceResponse = await fetch(backendProxyUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          type: 'getIceServers', // プロキシにICEサーバーリクエストを伝える
+          type: 'getIceServers', 
         }),
       });
       
-      // JSON応答を直接ICEサーバーの配列として受け取る
       const receivedIceServersArray = await iceResponse.json(); 
       console.log('ICE Config from /api/simli-proxy (getIceServers):', receivedIceServersArray);
 
-      if (receivedIceServersArray.error) throw new Error(receivedIceServersArray.error); // もしエラーオブジェクトが返された場合
-      // 受け取ったデータが配列であることを確認
+      if (receivedIceServersArray.error) throw new Error(receivedIceServersArray.error); 
       if (!Array.isArray(receivedIceServersArray)) { 
           throw new Error("Invalid ICE proxy response: Expected an array of iceServers.");
       }
 
-      // SimliClientConfig の準備（変更なし）
+      // 3. SimliClientConfigの準備
       const config: SimliClientConfig = {
         faceID: faceId,
         session_token: tokenData.session_token, 
@@ -124,52 +156,17 @@ const SimliAvatar: React.FC<SimliAvatarProps> = ({ faceId }) => {
       console.log('SimliClient initialized with Simli Auto token and WebRTC config.');
       
       // WebRTC接続を開始 (取得したICEサーバーの配列を直接渡す)
-      // ★★★ ここを修正 ★★★
-      // receivedIceServersArray は既に RTCIceServer[] 型の配列と想定されるため、これを直接渡す
       client.start(receivedIceServersArray); 
       console.log('Attempting to start Simli client WebRTC connection with provided ICE servers...');
 
-    } catch (error: unknown) {
+    } catch (error: unknown) { // 'any' から 'unknown' に修正
       console.error('Failed to initialize or start Simli client:', error);
       alert(`Error initializing/starting Simli: ${error instanceof Error ? error.message : String(error)}`);
       stopMicrophone(); 
       setIsSimliConnected(false);
     }
-  }, [faceId, isListening, isSimliConnected]);
+  }, [faceId, isListening, isSimliConnected, stopMicrophone, startMicrophoneAndStreamToSimli]); // 依存配列にすべての関数を含める
 
-
-  const startMicrophoneAndStreamToSimli = useCallback(async (client: SimliClient) => {
-    if (isListening) return;
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaStreamRef.current = stream;
-      setIsListening(true);
-      console.log('Microphone access granted. Streaming to Simli...');
-
-      const audioTrack = stream.getAudioTracks()[0];
-      if (audioTrack) {
-        client.listenToMediastreamTrack(audioTrack);
-      } else {
-        console.error('No audio track found in microphone stream.');
-        stopMicrophone();
-      }
-
-    } catch (err) {
-      console.error('Error accessing microphone:', err);
-      alert('Microphone access denied or error. Please allow microphone access.');
-      setIsListening(false);
-    }
-  }, [isListening]);
-
-  const stopMicrophone = useCallback(() => {
-    if (mediaStreamRef.current) {
-      mediaStreamRef.current.getTracks().forEach(track => track.stop());
-      mediaStreamRef.current = null;
-    }
-    setIsListening(false);
-    console.log('Microphone stopped.');
-  }, []);
 
   const handleStopSimli = () => {
     const client = simliClientRef.current;
