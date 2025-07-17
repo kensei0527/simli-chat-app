@@ -104,7 +104,7 @@ const SimliAvatar: React.FC<SimliAvatarProps> = ({ faceId }) => {
       }
 
       // SimliClientConfig の準備（変更なし）
-      let config: SimliClientConfig = {
+      const config: SimliClientConfig = {
         faceID: faceId,
         session_token: tokenData.session_token, 
         SimliURL: tokenData.ws_url,
@@ -129,7 +129,7 @@ const SimliAvatar: React.FC<SimliAvatarProps> = ({ faceId }) => {
       client.start(receivedIceServersArray); 
       console.log('Attempting to start Simli client WebRTC connection with provided ICE servers...');
 
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to initialize or start Simli client:', error);
       alert(`Error initializing/starting Simli: ${error instanceof Error ? error.message : String(error)}`);
       stopMicrophone(); 
