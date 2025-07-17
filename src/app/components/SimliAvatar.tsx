@@ -1,5 +1,5 @@
-// components/SimliAvatar.tsx
-'use client'; // Next.js App Routerの場合、クライアントコンポーネントとしてマーク
+// src/app/components/SimliAvatar.tsx
+'use client';
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { SimliClient, SimliClientConfig } from 'simli-client';
@@ -11,36 +11,34 @@ interface SimliAvatarProps {
 const SimliAvatar: React.FC<SimliAvatarProps> = ({ faceId }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
-  const simliClientRef = useRef<SimliClient | null>(null); // useRefでSimliClientインスタンスを保持
+  const simliClientRef = useRef<SimliClient | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isListening, setIsListening] = useState(false); // マイクがアクティブかどうか
-  const [isSimliReady, setIsSimliReady] = useState(false); // SimliClientが初期化されたか
+  const [isSimliConnected, setIsSimliConnected] = useState(false); // Simli接続状態
 
   const mediaStreamRef = useRef<MediaStream | null>(null);
 
   useEffect(() => {
-    // SimliClientインスタンスはコンポーネントのマウント時に一度だけ作成
     const client = new SimliClient();
-    simliClientRef.current = client; // refに保存
+    simliClientRef.current = client;
 
-    // Simliイベントリスナーの設定
     client.on('connected', () => {
       console.log('Simli connected!');
-      // 接続確立後、マイクからの音声ストリームをSimliに送信開始
+      setIsSimliConnected(true);
       startMicrophoneAndStreamToSimli(client);
     });
 
     client.on('disconnected', () => {
       console.log('Simli disconnected!');
+      setIsSimliConnected(false);
       stopMicrophone();
-      setIsSimliReady(false); // 切断されたら初期化されていない状態に戻す
     });
 
     client.on('failed', (error: any) => {
       console.error('Simli connection failed:', error);
       alert(`Simli connection failed: ${error instanceof Error ? error.message : String(error)}`);
+      setIsSimliConnected(false);
       stopMicrophone();
-      setIsSimliReady(false);
     });
 
     client.on('speaking', () => {
@@ -53,90 +51,93 @@ const SimliAvatar: React.FC<SimliAvatarProps> = ({ faceId }) => {
       console.log('Simli is silent.');
     });
 
-    // クリーンアップ関数
     return () => {
-      // コンポーネントのアンマウント時に接続を閉じる
-      if (simliClientRef.current && simliClientRef.current.close) { // .close()メソッドが存在するか確認
-         simliClientRef.current.close();
+      if (simliClientRef.current && typeof simliClientRef.current.close === 'function') {
+        simliClientRef.current.close();
       }
       stopMicrophone();
     };
-  }, []); // 空の依存配列でコンポーネントマウント時に一度だけ実行
+  }, []);
 
-  // SimliClientのInitializeとstartは、ボタンクリック時に実行
   const initializeAndStartSimli = useCallback(async () => {
     const client = simliClientRef.current;
-    if (!client || isListening || isSimliReady) return; // 既に接続中または初期化済みなら何もしない
+    if (!client || isListening || isSimliConnected) return;
 
     try {
-      // バックエンドプロキシのURL
       const backendProxyUrl = '/api/simli-proxy'; 
 
-      // SimliClientConfigの準備（APIキーは含まない）
+      // 1. Simli Autoのセッショントークンをプロキシ経由で取得
+      // POST /auto/token
+      const tokenResponse = await fetch(backendProxyUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'createAutoToken', // プロキシにトークン生成リクエストを伝える
+        }),
+      });
+      const tokenData = await tokenResponse.json();
+      console.log('Token Data from /api/simli-proxy (createAutoToken):', tokenData);
+      
+      if (tokenData.error) throw new Error(tokenData.error);
+      if (!tokenData.session_token) { 
+          throw new Error("Missing session_token in token proxy response.");
+      }
+
+      // 2. ICEサーバー情報をプロキシ経由で取得
+      // POST /getIceServers
+      const iceResponse = await fetch(backendProxyUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'getIceServers', // プロキシにICEサーバーリクエストを伝える
+        }),
+      });
+      
+      // JSON応答を直接ICEサーバーの配列として受け取る
+      const receivedIceServersArray = await iceResponse.json(); 
+      console.log('ICE Config from /api/simli-proxy (getIceServers):', receivedIceServersArray);
+
+      if (receivedIceServersArray.error) throw new Error(receivedIceServersArray.error); // もしエラーオブジェクトが返された場合
+      // 受け取ったデータが配列であることを確認
+      if (!Array.isArray(receivedIceServersArray)) { 
+          throw new Error("Invalid ICE proxy response: Expected an array of iceServers.");
+      }
+
+      // SimliClientConfig の準備（変更なし）
       let config: SimliClientConfig = {
         faceID: faceId,
+        session_token: tokenData.session_token, 
+        SimliURL: 'api.simli.ai/startWebRTCSession', 
+        apiKey: '', 
+        maxRetryAttempts: 3, 
+        retryDelay_ms: 1000,
         handleSilence: true,
         maxSessionLength: 3600,
         maxIdleTime: 600,
         videoRef: videoRef.current!,
         audioRef: audioRef.current!,
         enableConsoleLogs: true,
-        apiKey: '', // or your actual API key if needed
-        session_token: '', // will be set later
-        SimliURL: '', // or your actual Simli URL if needed
-        maxRetryAttempts: 0, // or your desired value
-        retryDelay_ms: 0, // or your desired value
       };
-
-      console.log('Using backend proxy for Simli authentication...');
-
-      // 1. セッション開始トークンとWebSocket URLを取得 (プロキシ経由)
-      const sessionResponse = await fetch(backendProxyUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'startSession',
-          faceId: config.faceID,
-          handleSilence: config.handleSilence,
-          maxSessionLength: config.maxSessionLength,
-          maxIdleTime: config.maxIdleTime,
-        }),
-      });
-      const sessionData = await sessionResponse.json();
-      if (sessionData.error) throw new Error(sessionData.error);
-      
-      // ドキュメントによると `session_token` と `ws_url` が返される
-      config.session_token = sessionData.session_token; 
-      config.SimliURL = sessionData.ws_url; // WebSocket URLも設定に含める
-
-      // 2. ICEサーバー情報を取得 (プロキシ経由)
-      const iceResponse = await fetch(backendProxyUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'getIceServer' }),
-      });
-      const iceConfig = await iceResponse.json();
-      if (iceConfig.error) throw new Error(iceConfig.error);
 
       // SimliClientを初期化
       client.Initialize(config);
-      setIsSimliReady(true);
-      console.log('SimliClient initialized.');
+      console.log('SimliClient initialized with Simli Auto token and WebRTC config.');
       
-      // WebRTC接続を開始 (ICE Configを渡す)
-      client.start(iceConfig); 
-      console.log('Attempting to start Simli client WebRTC connection...');
+      // WebRTC接続を開始 (取得したICEサーバーの配列を直接渡す)
+      // ★★★ ここを修正 ★★★
+      // receivedIceServersArray は既に RTCIceServer[] 型の配列と想定されるため、これを直接渡す
+      client.start(receivedIceServersArray); 
+      console.log('Attempting to start Simli client WebRTC connection with provided ICE servers...');
 
     } catch (error) {
       console.error('Failed to initialize or start Simli client:', error);
       alert(`Error initializing/starting Simli: ${error instanceof Error ? error.message : String(error)}`);
-      stopMicrophone(); // エラー時はマイクも停止
-      setIsSimliReady(false);
+      stopMicrophone(); 
+      setIsSimliConnected(false);
     }
-  }, [faceId, isListening, isSimliReady]);
+  }, [faceId, isListening, isSimliConnected]);
 
 
-  // マイクからの音声入力ストリームを開始し、Simliに送信する関数
   const startMicrophoneAndStreamToSimli = useCallback(async (client: SimliClient) => {
     if (isListening) return;
 
@@ -161,7 +162,6 @@ const SimliAvatar: React.FC<SimliAvatarProps> = ({ faceId }) => {
     }
   }, [isListening]);
 
-  // マイクからの音声入力ストリームを停止する関数
   const stopMicrophone = useCallback(() => {
     if (mediaStreamRef.current) {
       mediaStreamRef.current.getTracks().forEach(track => track.stop());
@@ -171,11 +171,10 @@ const SimliAvatar: React.FC<SimliAvatarProps> = ({ faceId }) => {
     console.log('Microphone stopped.');
   }, []);
 
-  // SimliClient.close() を呼び出す関数
   const handleStopSimli = () => {
     const client = simliClientRef.current;
-    if (client && client.close) { // .close()メソッドが存在するか確認
-      client.close(); // ドキュメントに沿って close() を使用
+    if (client && typeof client.close === 'function') {
+      client.close();
       console.log('Closing Simli client...');
     }
   };
@@ -185,15 +184,13 @@ const SimliAvatar: React.FC<SimliAvatarProps> = ({ faceId }) => {
       <h1>Simli AI Avatar Chat</h1>
       <div style={{ position: 'relative', width: '640px', height: '480px', margin: '20px auto', border: '1px solid #ccc' }}>
         <video ref={videoRef} autoPlay playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-        {/* audioRefはvideoRefと連携して自動的に音声が再生されるため、通常は不要だが、
-            ドキュメントの例に合わせる形で残しておく。display: 'none' で非表示。 */}
         <audio ref={audioRef} autoPlay style={{ display: 'none' }} />
       </div>
       <div>
-        <button onClick={initializeAndStartSimli} disabled={isListening || isSimliReady} style={{ margin: '10px', padding: '10px 20px', fontSize: '16px' }}>
+        <button onClick={initializeAndStartSimli} disabled={isListening || isSimliConnected} style={{ margin: '10px', padding: '10px 20px', fontSize: '16px' }}>
           Start Conversation
         </button>
-        <button onClick={handleStopSimli} disabled={!isListening} style={{ margin: '10px', padding: '10px 20px', fontSize: '16px' }}>
+        <button onClick={handleStopSimli} disabled={!isSimliConnected} style={{ margin: '10px', padding: '10px 20px', fontSize: '16px' }}>
           Stop Conversation
         </button>
       </div>
