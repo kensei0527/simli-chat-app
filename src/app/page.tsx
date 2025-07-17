@@ -5,7 +5,7 @@ import DottedFace from "@/app/Components/DottedFace"; // DottedFaceのパス
 // 不要なインポートを削除: SimliHeaderLogo, Navbar, Image, GitHubLogo
 
 const HomeMinimal: React.FC = () => {
-  const [showDottedFace, setShowDottedFace] = useState(true);
+  const [showDottedFace, setShowDottedFace] = useState<boolean>(true); // 型を明示的に指定
 
   // SimliAgentが開始されたときにDottedFaceを非表示にする
   const onStart = () => {

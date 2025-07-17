@@ -7,11 +7,11 @@ import cn from '@/app/utils/TailwindMergeAndClsx';
 
 interface Props {
   className?: string;
-  children?: React.ReactNode;
+  //children?: React.ReactNode;
 }
 
-const SimliHeaderLogo = ({ className, children }: Props) => {
-  const router = useRouter();
+const SimliHeaderLogo = ({ className}: Props) => {
+  //const router = useRouter();
   const pathname = usePathname();
 
   const handleClick = async () => {

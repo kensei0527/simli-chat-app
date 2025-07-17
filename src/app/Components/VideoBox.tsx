@@ -1,15 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMediaTrack } from '@daily-co/daily-react';
 
-export default function VideoBox({ id }: any) {
+export default function VideoBox({ id }: { id: string }) {
   const videoTrack = useMediaTrack(id, 'video');
   const audioTrack = useMediaTrack(id, 'audio');
 
   const [videoSrcObjectSet, setVideoSrcObjectSet] = useState(false);
   const [audioSrcObjectSet, setAudioSrcObjectSet] = useState(false);
 
-  const videoElement = useRef<any>(null);
-  const audioElement = useRef<any>(null);
+  const videoElement = useRef<HTMLVideoElement>(null);
+  const audioElement = useRef<HTMLAudioElement>(null);
 
   useEffect(() => {
     const videoRef = videoElement.current;
